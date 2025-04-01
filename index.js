@@ -1,2 +1,85 @@
+const express = require("express");
+const bodyParser = require("body-parser");
+const axios = require("axios");
+require("dotenv").config();
 
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+app.use(bodyParser.json());
+
+app.get("/", (req, res) => {
+    res.send("El bot está funcionando.");
+});
+
+app.post("/webhook", (req, res) => {
+    const body = req.body;
+
+    if (body.object === "page") {
+        body.entry.forEach(entry => {
+            const webhook_event = entry.messaging[0];
+            const sender_psid = webhook_event.sender.id;
+
+            if (webhook_event.message) {
+                handleMessage(sender_psid, webhook_event.message);
+            }
+        });
+
+        res.status(200).send("EVENT_RECEIVED");
+    } else {
+        res.sendStatus(404);
+    }
+});
+
+app.get("/webhook", (req, res) => {
+    const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+
+    if (mode && token === VERIFY_TOKEN) {
+        res.status(200).send(challenge);
+    } else {
+        res.sendStatus(403);
+    }
+});
+
+function handleMessage(sender_psid, received_message) {
+    let response;
+
+    if (received_message.text) {
+        const text = received_message.text.toLowerCase();
+
+        if (["jugar", "ruleta", "fichas", "girar"].includes(text)) {
+            const premios = [100, 200, 350, 400];
+            const premio = premios[Math.floor(Math.random() * premios.length)];
+
+            response = {
+                text: `¡Felicidades! Has ganado ${premio} fichas gratis 🎉. Para reclamarlas, ingresa a nuestro WhatsApp y realiza un depósito mínimo de 1000 pesos.`
+            };
+        } else {
+            response = { text: "Escribe 'JUGAR', 'RULETA', 'FICHAS' o 'GIRAR' para participar." };
+        }
+    }
+
+    callSendAPI(sender_psid, response);
+}
+
+function callSendAPI(sender_psid, response) {
+    const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+
+    const request_body = {
+        recipient: { id: sender_psid },
+        message: response
+    };
+
+    axios.post(`https://graph.facebook.com/v12.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, request_body)
+        .then(() => console.log("Mensaje enviado"))
+        .catch(error => console.error("Error al enviar mensaje:", error.response.data));
+}
+
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Servidor corriendo en el puerto ${PORT}`);
+});
 
