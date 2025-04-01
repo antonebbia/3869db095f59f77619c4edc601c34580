@@ -8,20 +8,39 @@ const PORT = process.env.PORT || 5000;
 
 app.use(bodyParser.json());
 
+const users = {};
+
 app.get("/", (req, res) => {
     res.send("El bot está funcionando.");
 });
 
+app.get("/webhook", (req, res) => {
+    const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+    let mode = req.query["hub.mode"];
+    let token = req.query["hub.verify_token"];
+    let challenge = req.query["hub.challenge"];
+
+    if (mode && token === VERIFY_TOKEN) {
+        res.status(200).send(challenge);
+    } else {
+        res.sendStatus(403);
+    }
+});
+
 app.post("/webhook", (req, res) => {
-    const body = req.body;
+    let body = req.body;
 
     if (body.object === "page") {
         body.entry.forEach(entry => {
-            const webhook_event = entry.messaging[0];
-            const sender_psid = webhook_event.sender.id;
+            let webhookEvent = entry.messaging[0];
+            let senderId = webhookEvent.sender.id;
 
-            if (webhook_event.message) {
-                handleMessage(sender_psid, webhook_event.message);
+            if (webhookEvent.message && webhookEvent.message.text) {
+                let messageText = webhookEvent.message.text.toLowerCase();
+                
+                if (messageText.includes("ruleta") || messageText.includes("girar")) {
+                    startRuleta(senderId);
+                }
             }
         });
 
@@ -31,55 +50,68 @@ app.post("/webhook", (req, res) => {
     }
 });
 
-app.get("/webhook", (req, res) => {
-    const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-
-    const mode = req.query["hub.mode"];
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
-
-    if (mode && token === VERIFY_TOKEN) {
-        res.status(200).send(challenge);
-    } else {
-        res.sendStatus(403);
-    }
-});
-
-function handleMessage(sender_psid, received_message) {
-    let response;
-
-    if (received_message.text) {
-        const text = received_message.text.toLowerCase();
-
-        if (["jugar", "ruleta", "fichas", "girar"].includes(text)) {
-            const premios = [100, 200, 350, 400];
-            const premio = premios[Math.floor(Math.random() * premios.length)];
-
-            response = {
-                text: `¡Felicidades! Has ganado ${premio} fichas gratis 🎉. Para reclamarlas, ingresa a nuestro WhatsApp y realiza un depósito mínimo de 1000 pesos.`
-            };
-        } else {
-            response = { text: "Escribe 'JUGAR', 'RULETA', 'FICHAS' o 'GIRAR' para participar." };
-        }
+function startRuleta(senderId) {
+    if (users[senderId] && (Date.now() - users[senderId]) < 24 * 60 * 60 * 1000) {
+        sendMessage(senderId, "¡Oops! Ya has jugado una vez. ¡Espera 24 horas para volver a girar!");
+        return;
     }
 
-    callSendAPI(sender_psid, response);
+    users[senderId] = Date.now();
+
+    let message = {
+        text: "¡Genial🎉 Has activado la RULETA DE LA FORTUNA! ¡Dale un giro para ver qué premio te toca! Recuerda que solo puedes jugar una vez ¡Buena suerte!",
+        quick_replies: [
+            {
+                content_type: "text",
+                title: "GIRAR",
+                payload: "GIRAR_RULETA"
+            }
+        ]
+    };
+    sendMessage(senderId, message);
 }
 
-function callSendAPI(sender_psid, response) {
-    const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+function handleSpin(senderId) {
+    sendGif(senderId);
+    setTimeout(() => {
+        let prize = spinWheel();
+        sendMessage(senderId, `¡FELICIDADES!🎉 Has ganado ${prize} fichas gratis. ¡A jugar! \n\nPara reclamar tus fichas, entra a nuestro WhatsApp y carga un mínimo de $1000 o más. ¡Nos vemos allí!\n\nhttps://wa.me/3873362953`);
+    }, 3000);
+}
 
-    const request_body = {
-        recipient: { id: sender_psid },
-        message: response
+function sendGif(senderId) {
+    const gifResponse = {
+        attachment: {
+            type: "image",
+            payload: {
+                url: "https://tenor.com/bE5Dm.gif",
+                is_reusable: true
+            }
+        }
     };
+    sendMessage(senderId, gifResponse);
+}
 
-    axios.post(`https://graph.facebook.com/v12.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, request_body)
-        .then(() => console.log("Mensaje enviado"))
-        .catch(error => console.error("Error al enviar mensaje:", error.response.data));
+function spinWheel() {
+    let random = Math.random();
+    if (random < 0.60) return "150";
+    if (random < 0.85) return "250";
+    if (random < 0.95) return "350";
+    return "400";
+}
+
+function sendMessage(senderId, message) {
+    const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+    axios.post(`https://graph.facebook.com/v12.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
+        recipient: { id: senderId },
+        message: message
+    }).catch(error => {
+        console.error("Error enviando mensaje:", error.response ? error.response.data : error);
+    });
 }
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Servidor corriendo en el puerto ${PORT}`);
+    console.log(`Servidor funcionando en puerto ${PORT}`);
 });
+
 
